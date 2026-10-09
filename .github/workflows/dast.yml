@@ -40,7 +40,8 @@ jobs:
       # 2. Executamos o ZAP diretamente via Docker, mapeando a rede e o volume
       - name: Varredura DAST Completa via Docker (Active Scan)
         run: |
-          docker run -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-full-scan.py -t http://localhost:8000 -r report_html.html 2>&1 | tee zap_log.txt || true
+          docker run -v $(pwd):/zap/wrk/:rw --network=host -t ghcr.io/zaproxy/zaproxy:stable zap-full-scan.py -t http://localhost:8000 -r report_html.html || true
+
           # O operador '|| true' no shell impede que o pipeline quebre (Crash)
           # caso o ZAP retorne código de erro ao encontrar vulnerabilidades.
           # O 'tee' salva a saída do ZAP em zap_log.txt para diagnóstico.
