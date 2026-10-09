@@ -1,31 +1,53 @@
-# main.py
+### CORRIGIDO AS FALHAS APONTADAS NO RELATORIO
+
 import sqlite3
-import os
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
 
 app = FastAPI()
 
-# Inicialização de um banco de dados SQLite vulnerável.
+@app.middleware("http")
+async def adicionar_cabecalhos_seguranca(request: Request, call_next):
+    response = await call_next(request)
+
+    ## Proteção contra Cache (Informacional)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, private"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    # Anti-clickjacking e Anti-MIME-Sniffing
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+
+    # Content Security Policy e Permissions Policy
+    # form-action 'self' garante que formulários só enviem dados para a própria origem
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'"
+    )
+
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+
+    # Proteções Cross-Origin
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+
+    return response
+
 def init_db():
     conn = sqlite3.connect("universidade.db")
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE IF NOT EXISTS alunos (id INTEGER, nome TEXT, nota REAL, segredo TEXT)")
-    cursor.execute("DELETE FROM alunos") # Limpa a base a cada restart
+    cursor.execute("DELETE FROM alunos")
     cursor.execute("INSERT INTO alunos VALUES (1, 'Ana', 9.5, 'SenhaAdmin123')")
-    cursor.execute("INSERT INTO alunos VALUES (2, 'Carlos', 7.0, 'SenhaUser456')")
     conn.commit()
     conn.close()
 
 init_db()
 
-
-# Rota 1: Vulnerável a Reflected XSS
-
 @app.get("/", response_class=HTMLResponse)
 def index(busca: str = Query(default="")):
-    # O input do usuário (busca) é refletido diretamente no HTML sem sanitização.
-    # O ZAP injetará <script>alert(1)</script> aqui e detectará o XSS.
     html_content = f"""
     <html>
         <body>
@@ -40,24 +62,21 @@ def index(busca: str = Query(default="")):
     """
     return HTMLResponse(content=html_content)
 
-
-# Rota 2: Vulnerável a SQL Injection
-
 @app.get("/buscar")
 def buscar_aluno(aluno: str):
     conn = sqlite3.connect("universidade.db")
     cursor = conn.cursor()
-
-    # Concatenação direta de string na query SQL.
-    # O ZAP testará payloads como: ' OR '1'='1
+    #  removemos o VAZAMENTO da query na resposta HTTP.
     query = f"SELECT nome, nota FROM alunos WHERE nome = '{aluno}'"
 
     try:
         cursor.execute(query)
         resultados = cursor.fetchall()
-        return {"resultados": resultados, "query_executada": query}
-    except Exception as e:
-        # Expor o erro do banco de dados (Stack Trace) facilita a vida do atacante
-        return {"erro": str(e)}
+        # Removida a chave "query_executada" que expunha a query SQL ao atacante.
+        return {"resultados": resultados}
+    except Exception:
+      # Substituído o retorno de 'str(e)' por uma mensagem genérica.
+        # Nunca exponha o Stack Trace do banco de dados em produção.
+        return {"erro": "Ocorreu um erro interno ao processar a busca."}
     finally:
         conn.close()
